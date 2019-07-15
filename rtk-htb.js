@@ -25,8 +25,8 @@ var SpaceCamp = require('space-camp.js');
 var System = require('system.js');
 var Network = require('network.js');
 var Utilities = require('utilities.js');
+
 var ComplianceService;
-var EventsService;
 var RenderService;
 
 //? if (DEBUG) {
@@ -74,6 +74,25 @@ function RtkHtb(configs) {
     /* Utilities
      * ---------------------------------- */
 
+    function union(ary1, ary2) {
+        if (!Utilities.isArray(ary1) || ary1.length === 0) {
+            return ary2;
+        }
+
+        if (!Utilities.isArray(ary2) || ary2.length === 0) {
+            return ary1;
+        }
+
+        var set = {};
+        var mergedAry = Utilities.mergeArrays(ary1, ary2);
+
+        for (var i = 0; i < mergedAry.length; i++) {
+            set[mergedAry[i]] = true;
+        }
+
+        return Object.keys(set);
+    }
+
     /**
      * Generates the request URL and query data to the endpoint for the xSlots
      * in the given returnParcels.
@@ -83,7 +102,6 @@ function RtkHtb(configs) {
      * @return {object}
      */
     function __generateRequestObj(returnParcels) {
-
         /* =============================================================================
          * STEP 2  | Generate Request URL
          * -----------------------------------------------------------------------------
@@ -144,36 +162,44 @@ function RtkHtb(configs) {
         /* ---------------------- PUT CODE HERE ------------------------------------ */
         var queryObj = {};
         var callbackId = System.generateUniqueId();
-        var auctionCode = false,
-            shortCodesAry  = [],
-            host = false,
-            categories = [];
+        var auctionCode = false;
+        var shortCodesAry = [];
+        var host = false;
+        var paramCategories = [];
+        var pubCategories = [];
 
-        returnParcels.forEach(function(rp) {
-          var params = rp.xSlotRef;
-          if (params.host) {
-            host = params.host;
-          }
-          if (params.categories) {
-            categories = categories.concat(params.categories);
-          }
-          if (!auctionCode) {
-            auctionCode = params.ai;
-          }
-          if (shortCodesAry.indexOf(params.sc) == -1) {
-            shortCodesAry.push(params.sc);
-            rp.id = params.sc;
-            queryObj[params.sc] = rp.id;
-          }
+        if (Utilities.isArray(Browser.topWindow.rtkcategories)) {
+            pubCategories = Browser.topWindow.rtkcategories;
+        }
+
+        returnParcels.forEach(function (rp) {
+            var params = rp.xSlotRef;
+            if (params.host) {
+                host = params.host;
+            }
+
+            if (params.categories) {
+                paramCategories = paramCategories.concat(params.categories);
+            }
+
+            if (!auctionCode) {
+                auctionCode = params.ai;
+            }
+
+            if (shortCodesAry.indexOf(params.sc) === -1) {
+                shortCodesAry.push(params.sc);
+                rp.id = params.sc;
+                queryObj[params.sc] = rp.id;
+            }
         });
 
         if (!host) {
-          host = 'bidder.rtk.io';
+            host = 'bidder.rtk.io';
         }
 
-        /* Change this to your bidder endpoint.*/
-        var baseUrl = Browser.getProtocol() + '//' + host + '/' + auctionCode +
-                '/' + shortCodesAry.join('_') + '/aardvark';
+        /* Change this to your bidder endpoint. */
+        var baseUrl = Browser.getProtocol() + '//' + host + '/' + auctionCode
+                + '/' + shortCodesAry.join('_') + '/aardvark';
 
         /* ------------------------ Get consent information -------------------------
          * If you want to implement GDPR consent in your adapter, use the function
@@ -200,23 +226,27 @@ function RtkHtb(configs) {
          * made by the wrapper to contact a Consent Management Platform.
          */
         var gdprStatus = ComplianceService.gdpr.getConsent();
-        var privacyEnabled = ComplianceService.isPrivacyEnabled();
 
         /* ---------------- Craft bid request using the above returnParcels --------- */
         queryObj.jsonp = false;
-        queryObj.rtkreferer = Browser.getHostname();
+        queryObj.rtkreferer = Browser.getPageUrl();
+        var categories = union(paramCategories, pubCategories);
         if (categories.length) {
-          queryObj.categories = categories.filter(function(elem, pos, arr) {
-            return arr.indexOf(elem) === pos;
-          }).map(function(c) {
-            return encodeURIComponent(c);
-          }).join(',');
+            queryObj.categories = categories.filter(function (elem, pos, arr) {
+                return arr.indexOf(elem) === pos;
+            })
+                .map(function (c) {
+                    return encodeURIComponent(c);
+                })
+                .join(',');
         }
 
         /* ------- Put GDPR consent code here if you are implementing GDPR ---------- */
 
-        queryObj.gdpr = gdprStatus.applies ? '1' : '0';
+        queryObj.gdpr = gdprStatus.applies;
         queryObj.consent = encodeURIComponent(gdprStatus.consentString);
+        queryObj.w = Browser.getViewportWidth();
+        queryObj.h = Browser.getViewportHeight();
 
         /* -------------------------------------------------------------------------- */
 
@@ -239,10 +269,11 @@ function RtkHtb(configs) {
      * callback type to CallbackTypes.CALLBACK_NAME and omit this function.
      */
     function adResponseCallback(adResponse) {
-        /* get callbackId from adResponse here */
+        /* Get callbackId from adResponse here */
         var callbackId = 0;
         __baseClass._adResponseStore[callbackId] = adResponse;
     }
+
     /* -------------------------------------------------------------------------- */
 
     /* Helpers
@@ -254,15 +285,15 @@ function RtkHtb(configs) {
      *
     */
 
-     /**
+    /**
      * This function will render the pixel given.
      * @param  {string} pixelUrl Tracking pixel img url.
      */
     function __renderPixel(pixelUrl) {
-        if (pixelUrl){
+        if (pixelUrl) {
             Network.img({
                 url: decodeURIComponent(pixelUrl),
-                method: 'GET',
+                method: 'GET'
             });
         }
     }
@@ -281,8 +312,6 @@ function RtkHtb(configs) {
      * attached to each one of the objects for which the demand was originally requested for.
      */
     function __parseResponse(sessionId, adResponse, returnParcels) {
-
-
         /* =============================================================================
          * STEP 4  | Parse & store demand response
          * -----------------------------------------------------------------------------
@@ -302,14 +331,13 @@ function RtkHtb(configs) {
          *
          */
 
-        /* ---------- Process adResponse and extract the bids into the bids array ------------*/
+        /* ---------- Process adResponse and extract the bids into the bids array ------------ */
 
         var bids = adResponse;
 
         /* --------------------------------------------------------------------------------- */
 
         for (var j = 0; j < returnParcels.length; j++) {
-
             var curReturnParcel = returnParcels[j];
 
             var headerStatsInfo = {};
@@ -320,7 +348,6 @@ function RtkHtb(configs) {
             var curBid = false;
 
             for (var i = 0; i < bids.length; i++) {
-
                 /**
                  * This section maps internal returnParcels and demand returned from the bid request.
                  * In order to match them correctly, they must be matched via some criteria. This
@@ -332,6 +359,7 @@ function RtkHtb(configs) {
                 if (curReturnParcel.xSlotRef.sc === bids[i].id) {
                     curBid = bids[i];
                     bids.splice(i, 1);
+
                     break;
                 }
             }
@@ -342,30 +370,31 @@ function RtkHtb(configs) {
                     __baseClass._emitStatsEvent(sessionId, 'hs_slot_pass', headerStatsInfo);
                 }
                 curReturnParcel.pass = true;
+
                 continue;
             }
 
-            /* ---------- Fill the bid variables with data from the bid response here. ------------*/
+            /* ---------- Fill the bid variables with data from the bid response here. ------------ */
 
             /* Using the above variable, curBid, extract various information about the bid and assign it to
              * these local variables */
 
-            /* the bid price for the given slot */
+            /* The bid price for the given slot */
             var bidPrice = curBid.cpm;
 
-            /* the size of the given slot */
+            /* The size of the given slot */
             var bidSize = [Number(curBid.width), Number(curBid.height)];
 
-            /* the creative/adm for the given slot that will be rendered if is the winner.
+            /* The creative/adm for the given slot that will be rendered if is the winner.
              * Please make sure the URL is decoded and ready to be document.written.
              */
             var bidCreative = curBid.adm;
 
-            /* the dealId if applicable for this slot. */
+            /* The dealId if applicable for this slot. */
             var bidDealId = curBid.dealid;
 
-            /* explicitly pass */
-            var bidIsPass = bidPrice <= 0 ? true : false;
+            /* Explicitly pass */
+            var bidIsPass = bidPrice <= 0;
 
             /* OPTIONAL: tracking pixel url to be fired AFTER rendering a winning creative.
             * If firing a tracking pixel is not required or the pixel url is part of the adm,
@@ -373,7 +402,7 @@ function RtkHtb(configs) {
             */
             var pixelUrl = curBid.nurl || '';
 
-            /* ---------------------------------------------------------------------------------------*/
+            /* --------------------------------------------------------------------------------------- */
 
             curBid = null;
             if (bidIsPass) {
@@ -384,6 +413,7 @@ function RtkHtb(configs) {
                     __baseClass._emitStatsEvent(sessionId, 'hs_slot_pass', headerStatsInfo);
                 }
                 curReturnParcel.pass = true;
+
                 continue;
             }
 
@@ -421,6 +451,11 @@ function RtkHtb(configs) {
             curReturnParcel.price = Number(__baseClass._bidTransformers.price.apply(bidPrice));
             //? }
 
+            var expiresAt = 0;
+            if (__profile.features.demandExpiry.enabled) {
+                expiresAt = __profile.features.demandExpiry.value + System.now();
+            }
+
             var pubKitAdId = RenderService.registerAd({
                 sessionId: sessionId,
                 partnerId: __profile.partnerId,
@@ -428,8 +463,8 @@ function RtkHtb(configs) {
                 requestId: curReturnParcel.requestId,
                 size: curReturnParcel.size,
                 price: targetingCpm,
-                dealId: bidDealId || undefined,
-                timeOfExpiry: __profile.features.demandExpiry.enabled ? (__profile.features.demandExpiry.value + System.now()) : 0,
+                dealId: bidDealId,
+                timeOfExpiry: expiresAt,
                 auxFn: __renderPixel,
                 auxArgs: [pixelUrl]
             });
@@ -446,7 +481,6 @@ function RtkHtb(configs) {
 
     (function __constructor() {
         ComplianceService = SpaceCamp.services.ComplianceService;
-        EventsService = SpaceCamp.services.EventsService;
         RenderService = SpaceCamp.services.RenderService;
 
         /* =============================================================================
@@ -456,12 +490,15 @@ function RtkHtb(configs) {
          * Please fill out the below partner profile according to the steps in the README doc.
          */
 
-        /* ---------- Please fill out this partner profile according to your module ------------*/
+        /* ---------- Please fill out this partner profile according to your module ------------ */
         __profile = {
-            partnerId: 'RtkHtb', // PartnerName
-            namespace: 'RtkHtb', // Should be same as partnerName
-            statsId: 'RTK', // Unique partner identifier
-            version: '2.0.0',
+            // PartnerName
+            partnerId: 'RtkHtb',
+            namespace: 'RtkHtb',
+
+            // Unique partner identifier
+            statsId: 'RTK',
+            version: '2.0.1',
             targetingType: 'slot',
             enabledAnalytics: {
                 requestTime: true
@@ -476,19 +513,30 @@ function RtkHtb(configs) {
                     value: 0
                 }
             },
-            targetingKeys: { // Targeting keys for demand, should follow format ix_{statsId}_id
+
+            // Targeting keys for demand, should follow format ix_{statsId}_id
+            targetingKeys: {
                 id: 'ix_rtk_id',
                 om: 'ix_rtk_cpm',
                 pm: 'ix_rtk_cpm',
                 pmid: 'ix_rtk_dealid'
             },
-            bidUnitInCents: 100, // The bid price unit (in cents) the endpoint returns, please refer to the readme for details
+
+            // The bid price unit (in cents) the endpoint returns, please refer to the readme for details
+            bidUnitInCents: 100,
             lineItemType: Constants.LineItemTypes.ID_AND_SIZE,
-            callbackType: Partner.CallbackTypes.NONE, // Callback type, please refer to the readme for details
-            architecture: Partner.Architectures.SRA, // Request architecture, please refer to the readme for details
-            requestType: Partner.RequestTypes.AJAX // Request type, jsonp, ajax, or any.
+
+            // Callback type, please refer to the readme for details
+            callbackType: Partner.CallbackTypes.NONE,
+
+            // Request architecture, please refer to the readme for details
+            architecture: Partner.Architectures.SRA,
+
+            // Request type, jsonp, ajax, or any.
+            requestType: Partner.RequestTypes.AJAX
         };
-        /* ---------------------------------------------------------------------------------------*/
+
+        /* --------------------------------------------------------------------------------------- */
 
         //? if (DEBUG) {
         var results = ConfigValidators.partnerBaseConfig(configs) || PartnerSpecificValidator(configs);
@@ -534,7 +582,7 @@ function RtkHtb(configs) {
         //? if (TEST) {
         parseResponse: __parseResponse,
         generateRequestObj: __generateRequestObj,
-        adResponseCallback: adResponseCallback,
+        adResponseCallback: adResponseCallback
         //? }
     };
 
